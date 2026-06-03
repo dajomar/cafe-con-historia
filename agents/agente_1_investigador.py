@@ -2,7 +2,7 @@ import os
 import sys
 import random
 import requests
-from datetime import datetime
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from supabase import create_client
 from slack_sdk import WebClient
@@ -12,7 +12,6 @@ from errores import (
     ErrorInfraestructura,
     ErrorContenido,
     ErrorNegocio,
-    notificar_infra,
     notificar_error_contenido,
     notificar_error_negocio,
     notificar_canal
@@ -31,34 +30,130 @@ CANAL_CONTENIDO = os.getenv("SLACK_CHANNEL", "#contenido")
 OLLAMA_URL      = os.getenv("OLLAMA_ENDPOINT", "http://localhost:11434") + "/api/generate"
 MODELO          = "llama3.1"
 MAX_INTENTOS    = 3
+VENTANA_DIAS    = 7
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 slack    = WebClient(token=SLACK_TOKEN)
 
 # ============================================================
-# PASO 1 — Escoger tema
+# PASO 1 — Obtener historial de los últimos 7 días
 # ============================================================
 
-def escoger_tema():
-    print("Buscando tema pendiente...")
+def obtener_historial():
+    """Retorna los temas publicados en los últimos VENTANA_DIAS días"""
+    fecha_limite = (datetime.now() - timedelta(days=VENTANA_DIAS)).isoformat()
     try:
-        resultado = supabase.table("temas").select("*").eq("publicado", False).execute()
+        resultado = supabase.table("temas")\
+            .select("tono, region, epoca")\
+            .eq("publicado", True)\
+            .gte("fecha_publicacion", fecha_limite)\
+            .execute()
+        return resultado.data
+    except Exception as e:
+        raise ErrorInfraestructura(f"No se pudo obtener historial de Supabase: {e}")
+
+def calcular_dimensiones_usadas(historial):
+    """Extrae las dimensiones usadas en el historial"""
+    return {
+        "tonos":    [t["tono"]   for t in historial if t.get("tono")],
+        "regiones": [t["region"] for t in historial if t.get("region")],
+        "epocas":   [t["epoca"]  for t in historial if t.get("epoca")],
+    }
+
+# ============================================================
+# PASO 2 — Selección inteligente con diversidad
+# ============================================================
+
+def calcular_diferencias(tema, usadas):
+    """Cuenta cuántas dimensiones son diferentes al historial reciente"""
+    diferencias = 0
+    ultimos_tonos    = usadas["tonos"][-2:]    if usadas["tonos"]    else []
+    ultimas_regiones = usadas["regiones"][-2:] if usadas["regiones"] else []
+    ultimas_epocas   = usadas["epocas"][-2:]   if usadas["epocas"]   else []
+
+    if tema.get("tono")   not in ultimos_tonos:    diferencias += 1
+    if tema.get("region") not in ultimas_regiones: diferencias += 1
+    if tema.get("epoca")  not in ultimas_epocas:   diferencias += 1
+
+    return diferencias
+
+def escoger_tema():
+    """
+    Selecciona un tema con lógica de diversidad:
+    1. Intenta encontrar temas con 2+ dimensiones diferentes
+    2. Si no hay, relaja a 1 dimensión diferente
+    3. Si no hay, escoge cualquier tema disponible y notifica
+    """
+    print("Analizando historial de los últimos 7 días...")
+
+    try:
+        # Obtener todos los temas disponibles
+        resultado = supabase.table("temas")\
+            .select("*")\
+            .eq("publicado", False)\
+            .execute()
     except Exception as e:
         raise ErrorInfraestructura(f"No se pudo conectar a Supabase: {e}")
 
-    if not resultado.data:
+    temas_disponibles = resultado.data
+
+    if not temas_disponibles:
         raise ErrorNegocio("No hay temas pendientes en la base de datos. Agrega más temas.")
 
-    tema = random.choice(resultado.data)
-    print(f"Tema escogido: {tema['pregunta']}")
-    return tema
+    # Obtener historial
+    historial = obtener_historial()
+    usadas    = calcular_dimensiones_usadas(historial)
+
+    print(f"Temas disponibles: {len(temas_disponibles)}")
+    print(f"Historial últimos {VENTANA_DIAS} días: {len(historial)} publicaciones")
+    print(f"Tonos recientes: {usadas['tonos'][-3:]}")
+    print(f"Regiones recientes: {usadas['regiones'][-3:]}")
+    print(f"Épocas recientes: {usadas['epocas'][-3:]}")
+
+    # Intentar con 2+ dimensiones diferentes
+    candidatos_2 = [t for t in temas_disponibles if calcular_diferencias(t, usadas) >= 2]
+    if candidatos_2:
+        tema = random.choice(candidatos_2)
+        print(f"✓ Tema seleccionado con 2+ dimensiones diferentes")
+        return tema, "diversidad_alta"
+
+    # Relajar a 1 dimensión diferente
+    candidatos_1 = [t for t in temas_disponibles if calcular_diferencias(t, usadas) >= 1]
+    if candidatos_1:
+        tema = random.choice(candidatos_1)
+        print(f"⚠ Tema seleccionado con 1 dimensión diferente — diversidad limitada")
+        notificar_canal(
+            CANAL_CONTENIDO,
+            f"⚠️ *Diversidad limitada hoy*\n"
+            f"No se encontró tema con 2+ dimensiones diferentes. "
+            f"Se seleccionó con 1 dimensión diferente."
+        )
+        return tema, "diversidad_baja"
+
+    # Sin diversidad disponible — escoger cualquiera
+    tema = random.choice(temas_disponibles)
+    print(f"✗ Sin diversidad disponible — tema aleatorio")
+    notificar_canal(
+        CANAL_CONTENIDO,
+        f"⚠️ *Sin diversidad disponible*\n"
+        f"Todos los temas disponibles comparten dimensiones con el historial reciente. "
+        f"Se seleccionó aleatoriamente. Considera agregar más temas variados."
+    )
+    return tema, "sin_diversidad"
 
 # ============================================================
-# PASO 2 — Generar contenido con Llama
+# PASO 3 — Generar contenido con Llama
 # ============================================================
 
-def generar_contenido(pregunta, categoria):
+def generar_contenido(pregunta, categoria, tono, region, epoca):
     print(f"Generando contenido con {MODELO}...")
+
+    contexto_tono = {
+        "pesado":     "El tono debe ser serio y reflexivo, apropiado para temas difíciles.",
+        "curioso":    "El tono debe ser sorprendente y entretenido, destacando lo inesperado.",
+        "reflexivo":  "El tono debe invitar a la reflexión profunda sobre la condición humana.",
+        "inspirador": "El tono debe ser positivo y motivador, destacando logros humanos."
+    }.get(tono, "")
 
     prompt = f"""Eres un divulgador experto de historia y geografía del canal educativo "Café con Historia".
 Tu enfoque es: "La historia explica el presente".
@@ -67,6 +162,9 @@ Tu misión es crear contenido educativo, veraz y accesible para hispanohablantes
 Responde esta pregunta con rigor histórico y tono conversacional:
 PREGUNTA: {pregunta}
 CATEGORÍA: {categoria}
+REGIÓN: {region}
+ÉPOCA HISTÓRICA: {epoca}
+INDICACIÓN DE TONO: {contexto_tono}
 
 Tu respuesta DEBE:
 1. Empezar con un hook impactante que genere curiosidad inmediata
@@ -90,10 +188,9 @@ Responde directamente con el contenido, sin introducción ni meta-comentarios.""
         if not contenido:
             raise ErrorContenido("Llama devolvió una respuesta vacía")
 
-        # Detectar rechazos de Llama
         frases_rechazo = ["lo siento", "no puedo", "no es apropiado", "contenido falso", "no me es posible"]
         if any(frase in contenido.lower() for frase in frases_rechazo):
-            raise ErrorContenido(f"Llama rechazó el prompt. Respuesta: {contenido[:200]}")
+            raise ErrorContenido(f"Llama rechazó el prompt: {contenido[:200]}")
 
         print(f"Contenido generado: {len(contenido)} caracteres")
         return contenido
@@ -106,22 +203,22 @@ Responde directamente con el contenido, sin introducción ni meta-comentarios.""
         raise ErrorContenido(f"Error generando contenido: {e}")
 
 # ============================================================
-# PASO 3 — Guardar en Supabase
+# PASO 4 — Guardar en Supabase
 # ============================================================
 
 def guardar_contenido(tema_id, contenido_slack):
     try:
         supabase.table("contenido").insert({
-            "tema_id": tema_id,
+            "tema_id":       tema_id,
             "contenido_slack": contenido_slack,
-            "modelo_usado": MODELO,
-            "aprobado": False
+            "modelo_usado":  MODELO,
+            "aprobado":      False
         }).execute()
 
         supabase.table("temas").update({
-            "publicado": True,
-            "fecha_publicacion": datetime.now().isoformat(),
-            "plataforma": "pipeline"
+            "publicado":          True,
+            "fecha_publicacion":  datetime.now().isoformat(),
+            "plataforma":         "pipeline"
         }).eq("id", tema_id).execute()
 
         print("✓ Contenido guardado en Supabase")
@@ -129,13 +226,21 @@ def guardar_contenido(tema_id, contenido_slack):
         raise ErrorInfraestructura(f"No se pudo guardar en Supabase: {e}")
 
 # ============================================================
-# PASO 4 — Notificar a Slack
+# PASO 5 — Notificar a Slack
 # ============================================================
 
-def notificar_contenido_generado(pregunta, categoria, contenido):
+def notificar_contenido_generado(pregunta, categoria, tono, region, epoca, contenido, nivel_diversidad):
+    iconos = {
+        "diversidad_alta": "🟢",
+        "diversidad_baja": "🟡",
+        "sin_diversidad":  "🔴"
+    }
+    icono = iconos.get(nivel_diversidad, "⚪")
+
     mensaje = f"""☕ *Café con Historia — Contenido generado*
 *{pregunta}*
-_{categoria}_
+_{categoria} | {tono} | {region} | {epoca}_
+{icono} Diversidad: {nivel_diversidad.replace('_', ' ')}
 
 {contenido}
 
@@ -154,11 +259,17 @@ def correr_agente():
     print("CAFÉ CON HISTORIA — Agente 1 (Investigador)")
     print("=" * 50)
 
-    # Escoger tema — puede lanzar ErrorNegocio o ErrorInfraestructura
-    tema = escoger_tema()
+    tema, nivel_diversidad = escoger_tema()
+
     pregunta  = tema["pregunta"]
     categoria = tema["categoria"]
+    tono      = tema.get("tono", "reflexivo")
+    region    = tema.get("region", "global")
+    epoca     = tema.get("epoca", "contemporanea")
     tema_id   = tema["id"]
+
+    print(f"\nTema: {pregunta}")
+    print(f"Clasificación: {tono} | {region} | {epoca}")
 
     intento      = 1
     ultima_razon = ""
@@ -167,19 +278,14 @@ def correr_agente():
         print(f"\n--- Intento {intento}/{MAX_INTENTOS} ---")
 
         try:
-            contenido = generar_contenido(pregunta, categoria)
-
-            # Guardar en Supabase
+            contenido = generar_contenido(pregunta, categoria, tono, region, epoca)
             guardar_contenido(tema_id, contenido)
-
-            # Notificar a Slack
-            notificar_contenido_generado(pregunta, categoria, contenido)
-
+            notificar_contenido_generado(pregunta, categoria, tono, region, epoca, contenido, nivel_diversidad)
             print(f"\n✓ Contenido generado y guardado en intento {intento}")
             return
 
         except ErrorInfraestructura:
-            raise  # Relanzar para que main.py lo capture
+            raise
 
         except ErrorContenido as e:
             print(f"Error de contenido en intento {intento}: {e}")
@@ -187,7 +293,6 @@ def correr_agente():
 
         intento += 1
 
-    # Agotó los intentos
     notificar_error_contenido("Agente 1 — Investigador", pregunta, ultima_razon, MAX_INTENTOS)
     print(f"\n✗ No se pudo generar contenido después de {MAX_INTENTOS} intentos")
 
