@@ -358,11 +358,12 @@ def correr_agente():
             guardar_evaluacion(contenido_id, 0, False, intentos=1)
             print("\n✗ Contenido rechazado por errores factuales graves — revisión manual requerida")
             return
-
+            
         if veredicto == "revision_manual":
-            # Dudas menores — notificar pero continuar con evaluación editorial
             notificar_revision_manual(pregunta, texto_actual, verificacion)
-            print("⚠ Dudas factuales menores notificadas — continuando con evaluación editorial")
+            guardar_evaluacion(contenido_id, 0, False, intentos=1)
+            print("\n⚠ Contenido detenido por dudas factuales — revisión manual requerida")
+            return
 
     except ErrorInfraestructura:
         raise
