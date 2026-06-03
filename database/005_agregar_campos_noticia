@@ -1,0 +1,11 @@
+-- ============================================================
+-- Café con Historia — Migración 005
+-- Fecha: Junio 2026
+-- Descripción: Agregar campos para temas inspirados en noticias
+-- ============================================================
+
+ALTER TABLE temas ADD COLUMN fuente TEXT DEFAULT 'historico';
+ALTER TABLE temas ADD COLUMN url_noticia TEXT;
+ALTER TABLE temas ADD COLUMN fecha_noticia DATE;
+
+-- fuente: 'historico' | 'noticia'

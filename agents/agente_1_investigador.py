@@ -79,7 +79,8 @@ def calcular_diferencias(tema, usadas):
 
 def escoger_tema():
     """
-    Selecciona un tema con lógica de diversidad:
+    Selecciona un tema con lógica de prioridad y diversidad:
+    0. Prioriza temas de fuente 'noticia' generados hoy (Agente 0)
     1. Intenta encontrar temas con 2+ dimensiones diferentes
     2. Si no hay, relaja a 1 dimensión diferente
     3. Si no hay, escoge cualquier tema disponible y notifica
@@ -87,7 +88,21 @@ def escoger_tema():
     print("Analizando historial de los últimos 7 días...")
 
     try:
-        # Obtener todos los temas disponibles
+        # Prioridad: temas de noticias generados hoy por el Agente 0
+        hoy = datetime.now().date().isoformat()
+        resultado_noticia = supabase.table("temas")\
+            .select("*")\
+            .eq("publicado", False)\
+            .eq("fuente", "noticia")\
+            .eq("fecha_noticia", hoy)\
+            .execute()
+
+        if resultado_noticia.data:
+            tema = resultado_noticia.data[0]
+            print(f"✓ Tema de actualidad encontrado para hoy: {tema['pregunta']}")
+            return tema, "noticia_actualidad"
+
+        # Obtener todos los temas históricos disponibles
         resultado = supabase.table("temas")\
             .select("*")\
             .eq("publicado", False)\
@@ -231,16 +246,19 @@ def guardar_contenido(tema_id, contenido_slack):
 
 def notificar_contenido_generado(pregunta, categoria, tono, region, epoca, contenido, nivel_diversidad):
     iconos = {
-        "diversidad_alta": "🟢",
-        "diversidad_baja": "🟡",
-        "sin_diversidad":  "🔴"
+        "diversidad_alta":    "🟢",
+        "diversidad_baja":    "🟡",
+        "sin_diversidad":     "🔴",
+        "noticia_actualidad": "📰"
     }
     icono = iconos.get(nivel_diversidad, "⚪")
+
+    etiqueta = "Actualidad" if nivel_diversidad == "noticia_actualidad" else nivel_diversidad.replace('_', ' ')
 
     mensaje = f"""☕ *Café con Historia — Contenido generado*
 *{pregunta}*
 _{categoria} | {tono} | {region} | {epoca}_
-{icono} Diversidad: {nivel_diversidad.replace('_', ' ')}
+{icono} {etiqueta}
 
 {contenido}
 

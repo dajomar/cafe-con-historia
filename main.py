@@ -3,7 +3,6 @@ import sys
 import traceback
 from datetime import datetime
 from dotenv import load_dotenv
-from slack_sdk import WebClient
 
 # ============================================================
 # CONFIGURACIÓN
@@ -11,17 +10,20 @@ from slack_sdk import WebClient
 
 load_dotenv("D:\\proyectos\\cafe-con-historia\\.env")
 
-SLACK_TOKEN   = os.getenv("SLACK_TOKEN")
+SLACK_TOKEN     = os.getenv("SLACK_TOKEN")
 CANAL_CONTENIDO = os.getenv("SLACK_CHANNEL", "#contenido")
 CANAL_INFRA     = os.getenv("SLACK_CANAL_INFRA", "#infraestructura")
+CANAL_ERRORES   = os.getenv("SLACK_CANAL_ERRORES", "#errores")
 
-slack = WebClient(token=SLACK_TOKEN)
+# Días donde corre el Agente 0 (0=lunes, 2=miércoles, 4=viernes)
+DIAS_AGENTE_0 = [0, 2, 4]
 
 sys.path.insert(0, "D:\\proyectos\\cafe-con-historia\\utils")
 sys.path.insert(0, "D:\\proyectos\\cafe-con-historia\\agents")
 
 from errores import (
     ErrorInfraestructura,
+    ErrorNegocio,
     verificar_ollama,
     verificar_token_facebook,
     notificar_infra,
@@ -43,16 +45,19 @@ def log(mensaje):
 # NOTIFICACIONES
 # ============================================================
 
-def notificar_inicio():
+def notificar_inicio(con_agente_0):
+    agente_0_txt = " + Agente 0 (Noticias)" if con_agente_0 else ""
     notificar_canal(
         CANAL_CONTENIDO,
-        f"☕ *Café con Historia* — Pipeline iniciado\n_{datetime.now().strftime('%d/%m/%Y %H:%M')}_"
+        f"☕ *Café con Historia* — Pipeline iniciado{agente_0_txt}\n"
+        f"_{datetime.now().strftime('%d/%m/%Y %H:%M')}_"
     )
 
 def notificar_exito():
     notificar_canal(
         CANAL_CONTENIDO,
-        f"✅ *Pipeline completado exitosamente*\n_{datetime.now().strftime('%d/%m/%Y %H:%M')}_"
+        f"✅ *Pipeline completado exitosamente*\n"
+        f"_{datetime.now().strftime('%d/%m/%Y %H:%M')}_"
     )
 
 # ============================================================
@@ -62,7 +67,6 @@ def notificar_exito():
 def verificar_infraestructura():
     log("Verificando infraestructura...")
 
-    # 1. Verificar Ollama
     try:
         verificar_ollama()
         log("✓ Ollama corriendo")
@@ -71,7 +75,6 @@ def verificar_infraestructura():
         notificar_infra(str(e))
         sys.exit(1)
 
-    # 2. Verificar token de Facebook
     try:
         verificar_token_facebook()
         log("✓ Token de Facebook verificado")
@@ -106,7 +109,29 @@ def main():
     # Verificar infraestructura ANTES de todo
     verificar_infraestructura()
 
-    notificar_inicio()
+    # Determinar si hoy toca el Agente 0
+    dia_semana = datetime.now().weekday()
+    correr_agente_0 = dia_semana in DIAS_AGENTE_0
+    log(f"Día de semana: {dia_semana} | Agente 0: {'Sí' if correr_agente_0 else 'No'}")
+
+    notificar_inicio(correr_agente_0)
+
+    # Agente 0 — Noticias (lunes, miércoles, viernes)
+    if correr_agente_0:
+        try:
+            ejecutar_agente("Agente 0 — Noticias", "agente_0_noticias")
+        except ErrorInfraestructura as e:
+            log(f"ERROR INFRAESTRUCTURA en Agente 0: {e}")
+            notificar_infra(f"Agente 0 — Noticias\n{str(e)}")
+            sys.exit(1)
+        except ErrorNegocio as e:
+            # Error de negocio en Agente 0 no detiene el pipeline
+            log(f"AVISO en Agente 0: {e}")
+            notificar_canal(CANAL_ERRORES, f"ℹ️ *Agente 0 sin noticias relevantes hoy*\n{str(e)}")
+        except Exception as e:
+            # Error inesperado en Agente 0 no detiene el pipeline
+            log(f"ERROR inesperado en Agente 0: {e}")
+            notificar_canal(CANAL_ERRORES, f"⚠️ *Error en Agente 0*\n```{traceback.format_exc()[:300]}```")
 
     # Agente 1 — Investigador
     try:
@@ -117,10 +142,7 @@ def main():
         sys.exit(1)
     except Exception as e:
         log(f"ERROR en Agente 1: {e}")
-        notificar_canal(
-            os.getenv("SLACK_CANAL_ERRORES", "#errores"),
-            f"🚨 *Error en Agente 1*\n```{traceback.format_exc()[:500]}```"
-        )
+        notificar_canal(CANAL_ERRORES, f"🚨 *Error en Agente 1*\n```{traceback.format_exc()[:500]}```")
         sys.exit(1)
 
     # Agente 2 — Editor crítico
@@ -132,10 +154,7 @@ def main():
         sys.exit(1)
     except Exception as e:
         log(f"ERROR en Agente 2: {e}")
-        notificar_canal(
-            os.getenv("SLACK_CANAL_ERRORES", "#errores"),
-            f"🚨 *Error en Agente 2*\n```{traceback.format_exc()[:500]}```"
-        )
+        notificar_canal(CANAL_ERRORES, f"🚨 *Error en Agente 2*\n```{traceback.format_exc()[:500]}```")
         sys.exit(1)
 
     # Agente 3 — Publicador
@@ -147,10 +166,7 @@ def main():
         sys.exit(1)
     except Exception as e:
         log(f"ERROR en Agente 3: {e}")
-        notificar_canal(
-            os.getenv("SLACK_CANAL_ERRORES", "#errores"),
-            f"🚨 *Error en Agente 3*\n```{traceback.format_exc()[:500]}```"
-        )
+        notificar_canal(CANAL_ERRORES, f"🚨 *Error en Agente 3*\n```{traceback.format_exc()[:500]}```")
         sys.exit(1)
 
     log("Pipeline completado exitosamente")
