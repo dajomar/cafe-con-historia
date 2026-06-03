@@ -262,7 +262,6 @@ Agente 4 (Video)        → guión + Wan2.1 → YouTube Shorts + Facebook
 
 ## Contexto del desarrollador
 
-- David, IT support en Montreal, originalmente de Colombia
 - Background en análisis de datos, SQL, sistemas
 - Objetivo: sistema automatizado de contenido que escale sin intervención manual diaria
 - El CLAUDE.md debe actualizarse con cada cambio significativo al proyecto
