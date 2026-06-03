@@ -2,16 +2,11 @@
 
 ## Visión
 Canal educativo con el enfoque: **"La historia explica el presente"**.
-Contenido diario que conecta acontecimientos históricos con situaciones del mundo actual, dirigido a hispanohablantes.
+Contenido diario que conecta acontecimientos históricos con situaciones del mundo actual, dirigido a hispanohablantes — especialmente latinos en Canadá/USA y profesionales de 30-45 años que leen noticias y quieren contexto histórico.
 
 No es un canal de datos curiosos — usa la historia como lente para entender por qué el mundo de hoy funciona como funciona.
 
-**Ejemplos de contenido:**
-- ¿Por qué Corea está dividida en dos países?
-- ¿Por qué Canadá tiene dos idiomas oficiales?
-- ¿Por qué existe la OTAN?
-- ¿Por qué Alberta y Saskatchewan quieren separarse de Canadá?
-- ¿Por qué América Latina es pobre si tiene tantos recursos?
+**Eslogan:** "Donde el pasado cobra vida"
 
 ---
 
@@ -25,6 +20,7 @@ No es un canal de datos curiosos — usa la historia como lente para entender po
 | Publicación | Facebook Graph API v25.0 |
 | Lenguaje | Python 3.11 |
 | Entorno | HP Z420 / Windows 11 Pro |
+| Control de versiones | GitHub — github.com/dajomar/cafe-con-historia |
 
 ---
 
@@ -33,16 +29,21 @@ No es un canal de datos curiosos — usa la historia como lente para entender po
 ```
 cafe-con-historia/
 ├── agents/
-│   ├── agente_1_investigador.py   # Genera contenido con Llama
-│   ├── agente_2_editor.py         # Evalúa calidad (score mín 7/10)
-│   └── agente_3_publicador.py     # Publica en Facebook
+│   ├── agente_0_noticias.py       # Lee RSS y genera temas históricos inspirados en noticias
+│   ├── agente_1_investigador.py   # Selecciona tema con diversidad y genera contenido
+│   ├── agente_2_editor.py         # Verifica hechos + evalúa calidad editorial
+│   └── agente_3_publicador.py     # Adapta para Facebook, evalúa post y publica
 ├── database/
 │   └── migrations/
 │       ├── 001_crear_tablas_iniciales.sql
-│       └── 002_agregar_campos_calidad.sql
+│       ├── 002_agregar_campos_calidad.sql
+│       ├── 003_agregar_campos_diversidad.sql
+│       ├── 004_crear_tabla_metricas.sql
+│       └── 005_agregar_campos_noticia.sql
 ├── scripts/
 │   ├── insertar_temas.py
-│   └── setup_scheduler.ps1
+│   ├── clasificar_temas.py        # Clasifica temas con Llama (tono, region, epoca)
+│   └── setup_scheduler.ps1        # Configura Windows Task Scheduler
 ├── utils/
 │   └── errores.py                 # Manejo centralizado de errores
 ├── main.py                        # Orquestador del pipeline
@@ -56,7 +57,7 @@ cafe-con-historia/
 
 ## Base de datos (Supabase)
 
-**Proyecto:** cafe-con-historia | **Región:** Americas
+**Proyecto:** cafe-con-historia | **Región:** Americas | **Page ID Facebook:** 1159270103934855
 
 ### Tabla: temas
 ```sql
@@ -66,6 +67,12 @@ categoria         TEXT NOT NULL
 publicado         BOOLEAN DEFAULT FALSE
 fecha_publicacion TIMESTAMP
 plataforma        TEXT
+tono              TEXT          -- pesado | curioso | reflexivo | inspirador
+region            TEXT          -- america_latina | norteamerica | europa | asia | africa | global
+epoca             TEXT          -- antigua | medieval | moderna | contemporanea | actual
+fuente            TEXT DEFAULT 'historico'  -- historico | noticia
+url_noticia       TEXT
+fecha_noticia     DATE
 ```
 
 ### Tabla: contenido
@@ -81,13 +88,17 @@ intentos_generacion INTEGER DEFAULT 1
 aprobado            BOOLEAN DEFAULT FALSE
 ```
 
-### Categorías
-- Geopolitica
-- Instituciones
-- Cultura
-- Economia
-- Ciencia
-- America Latina
+### Tabla: metricas (lista para usar cuando haya datos)
+```sql
+id             INTEGER PRIMARY KEY
+contenido_id   INTEGER REFERENCES contenido(id)
+fb_post_id     TEXT
+likes          INTEGER DEFAULT 0
+comentarios    INTEGER DEFAULT 0
+shares         INTEGER DEFAULT 0
+alcance        INTEGER DEFAULT 0
+fecha_consulta TIMESTAMP DEFAULT NOW()
+```
 
 ---
 
@@ -97,49 +108,53 @@ aprobado            BOOLEAN DEFAULT FALSE
 ```
 main.py
   → verificar_infraestructura() — Ollama + token Facebook
+  → Agente 0 — Noticias (lunes, miércoles, viernes)
   → Agente 1 — Investigador
   → Agente 2 — Editor crítico
   → Agente 3 — Publicador
 ```
 
-### Agente 1 — agente_1_investigador.py
-Escoge tema no publicado → genera contenido con Llama → guarda en Supabase → notifica en Slack
+### Agente 0 — agente_0_noticias.py
+Corre lunes, miércoles y viernes. Lee RSS de BBC Mundo, Deutsche Welle y France 24.
+Selecciona la noticia más relevante para Café con Historia y genera una pregunta histórica inspirada en ella.
+Guarda en Supabase con `fuente='noticia'` y `fecha_noticia=hoy`.
+Si falla, el pipeline continúa con temas históricos normales.
 
-- Timeout Ollama: 600 segundos
-- Detecta rechazos de Llama y reintenta (máx 3 intentos)
-- Marca tema como `publicado = TRUE` al guardar
+### Agente 1 — agente_1_investigador.py
+Lógica de selección de tema con dos prioridades:
+1. Si hay tema de `fuente='noticia'` de hoy → lo usa primero
+2. Si no → aplica lógica de diversidad de 7 días (2+ dimensiones diferentes de tono/región/época)
+
+Genera contenido con Llama usando el tono, región y época del tema.
+Detecta rechazos de Llama y reintenta (máx 3 intentos).
+Notifica en Slack con indicador de diversidad: 🟢 alta | 🟡 baja | 🔴 sin diversidad | 📰 actualidad
 
 ### Agente 2 — agente_2_editor.py
-Evalúa el contenido largo contra 5 estándares de calidad usando Llama como crítico
+Dos fases separadas:
 
-**Estándares:** Integridad, Estructura histórica, Engagement, Credibilidad, Personalidad visual
-**Score mínimo:** 7/10
-**Intentos:** máximo 3, regenera con instrucciones específicas si falla
-**Aprobado:** guarda `aprobado = TRUE` en Supabase y notifica score en Slack
+**Fase 1 — Verificación factual** (historiador escéptico):
+- Busca errores graves y verificables: fechas completamente incorrectas, nombres equivocados, eventos que nunca ocurrieron
+- NO marca simplificaciones narrativas ni matices académicos como errores
+- Veredictos: `aprobado` → continúa | `revision_manual` → detiene y notifica en #errores | `rechazado` → detiene
+
+**Fase 2 — Evaluación editorial** (solo si pasa verificación):
+- Evalúa 5 criterios: integridad, estructura histórica, engagement, credibilidad, personalidad visual
+- Score mínimo: 7/10 | Máximo 3 intentos | Regenera con instrucciones específicas si falla
 
 ### Agente 3 — agente_3_publicador.py
-Toma contenido aprobado → adapta para Facebook → evalúa post → publica → notifica
-
-**Estándares Facebook:** Hook, Longitud, Emojis, Pregunta final, Hashtags, Tono, Integridad
-**Score mínimo:** 7/10
-**Intentos:** máximo 3
+Adapta el contenido aprobado para Facebook (máx 150 palabras, emojis, hook, hashtags).
+Evalúa el post antes de publicar (score mínimo 7/10, máx 3 intentos).
+Detecta errores de infraestructura de Facebook (token expirado, permisos) y los separa de errores de contenido.
 
 ---
 
 ## Manejo de errores (utils/errores.py)
-
-Tres tipos de error con comportamiento diferente:
 
 | Tipo | Canal Slack | Comportamiento |
 |---|---|---|
 | `ErrorInfraestructura` | #infraestructura | Detiene el pipeline completo |
 | `ErrorContenido` | #errores | Reintenta hasta MAX_INTENTOS |
 | `ErrorNegocio` | #errores | Notifica pero continúa |
-
-**Errores de infraestructura:**
-- Token de Facebook expirado (código 190)
-- Ollama no responde
-- Supabase no disponible
 
 **Verificaciones previas en main.py:**
 - `verificar_ollama()` — antes de correr cualquier agente
@@ -175,20 +190,54 @@ OLLAMA_ENDPOINT=http://localhost:11434
 ## Cómo correr el pipeline
 
 ```bash
-cd D:\proyectos\cafe-con-historia
+# Conectarse a la PC desde el Mac
+ssh david@192.168.2.66
+D:
+cd proyectos\cafe-con-historia
+git pull
 
-# Pipeline completo (recomendado)
+# Pipeline completo
 python main.py
 
 # Agentes individuales
+python agents/agente_0_noticias.py
 python agents/agente_1_investigador.py
 python agents/agente_2_editor.py
 python agents/agente_3_publicador.py
 ```
 
-**Scheduler:** tarea programada en Windows Task Scheduler llamada `CafeConHistoria`
+**Scheduler:** Windows Task Scheduler — tarea `CafeConHistoria`
 **Hora:** 12:00 PM diario
-**Configurar:** `.\scripts\setup_scheduler.ps1` (como administrador)
+**Agente 0:** corre automáticamente lunes, miércoles y viernes
+
+---
+
+## Token de Facebook
+
+Expira cada 60 días. Ver guía completa en `guia-renovacion-token-facebook.docx`.
+
+Proceso rápido:
+1. Graph API Explorer → User Token con permisos: `pages_show_list`, `pages_read_engagement`, `pages_manage_posts`
+2. Intercambiar: `oauth/access_token?grant_type=fb_exchange_token&client_id=APP_ID&client_secret=APP_SECRET&fb_exchange_token=TOKEN`
+3. Con el token largo → `me/accounts` → copiar `access_token` de Café con Historia
+4. Actualizar `FB_PAGE_TOKEN` y `FB_TOKEN_EXPIRA` en `.env`
+
+---
+
+## Conexión SSH Mac → PC
+
+Ver guía completa en `guia-ssh-mac-pc.docx`.
+
+```bash
+# Conectar
+ssh david@192.168.2.66
+
+# Sin contraseña (SSH keys)
+ssh-keygen -t ed25519 -C "cafe-con-historia"
+ssh-copy-id david@192.168.2.66
+```
+
+VS Code Remote SSH: instala extensión "Remote - SSH" → conectar a `david@192.168.2.66`
 
 ---
 
@@ -201,67 +250,64 @@ python agents/agente_3_publicador.py
 | Facebook | Página: Café con Historia. Page ID: 1159270103934855 |
 | Ollama | v0.30.2, modelo: llama3.1:latest (4.9GB) |
 | Facebook App | cafe-con-historia en developers.facebook.com |
+| GitHub | github.com/dajomar/cafe-con-historia |
 
 ---
 
-## Token de Facebook
-
-El token expira cada 60 días. Ver guía completa en:
-`guia-renovacion-token-facebook.docx`
-
-**Resumen:**
-1. Graph API Explorer → User Token → `oauth/access_token?grant_type=fb_exchange_token&...`
-2. Con el token largo → `me/accounts` → copiar access_token de Café con Historia
-3. Actualizar `FB_PAGE_TOKEN` y `FB_TOKEN_EXPIRA` en `.env`
-
----
-
-## Hardware actual
+## Hardware
 
 | Componente | Especificación |
 |---|---|
 | CPU | Intel Xeon E5-1620 v2 @ 3.70GHz |
 | RAM | 32 GB DDR3 |
-| GPU | NVIDIA Quadro K620 (2GB VRAM) — NO compatible con modelos de video IA |
-| GPU recomendada | RTX 3060 12GB (~$250 CAD usada) para habilitar Wan2.1 |
+| GPU actual | NVIDIA Quadro K620 (2GB VRAM) — NO compatible con modelos de video IA |
+| GPU pendiente | RTX 3060 12GB (~$250 CAD usada en Kijiji Montreal) |
 | OS | Windows 11 Pro 23H2 |
+| Mac | MacBook con M1 — usado para trabajar remotamente via SSH |
 
 ---
 
 ## Tareas pendientes
 
-### Mejoras a los agentes
-- [ ] Recolectar métricas de Facebook semanalmente (likes, comentarios, shares)
-- [ ] Tabla `metricas` en Supabase — migración 003
-- [ ] Ajustar tono del prompt según posts con mayor engagement
+### Agentes por construir
+- [ ] Agente 4 — Distribuidor en grupos de Facebook (latinos en Canadá/USA, geopolítica, historia)
+- [ ] Agente 5 — Engagement: responde comentarios con Llama
+- [ ] Agente 6 — Analista semanal: reporte de métricas y recomendaciones
+- [ ] Human-in-the-loop via Slack buttons para revision_manual
 
-### Contenido
-- [ ] Ampliar base de datos a 200 temas
-- [ ] Agente 0 de noticias recientes via RSS
-- [ ] Versión en francés del canal
+### Mejoras a agentes existentes
+- [ ] Memoria de engagement: leer métricas de Facebook y ajustar selección de temas
+- [ ] Agente 0: agregar más fuentes RSS
 
 ### Pipeline de video (requiere GPU)
 - [ ] Adquirir RTX 3060 12GB
 - [ ] Instalar ComfyUI + Wan2.1
-- [ ] Integrar video al pipeline
-- [ ] Publicar en YouTube Shorts y Facebook
+- [ ] Integrar generación de video al pipeline
+
+### Contenido
+- [ ] Ampliar base de datos a 200 temas
+- [ ] Versión en francés del canal
 
 ---
 
-## Arquitectura futura
+## Arquitectura completa planeada
 
 ```
-Agente 0 (Noticias)     → genera temas desde RSS → Supabase
-Agente 1 (Investigador) → genera contenido largo → Slack
-Agente 2 (Editor)       → evalúa calidad → aprueba o regenera
-Agente 3 (Publicador)   → adapta → evalúa post → publica Facebook
-Agente 4 (Video)        → guión + Wan2.1 → YouTube Shorts + Facebook
+Agente 0 (Noticias L/M/V) → temas inspirados en actualidad → Supabase
+Agente 1 (Investigador)   → prioriza noticias → diversidad 7 días → genera contenido
+Agente 2 (Editor)         → verifica hechos → evalúa calidad → aprueba o detiene
+Agente 3 (Publicador)     → adapta Facebook → evalúa post → publica
+Agente 4 (Distribuidor)   → comparte en grupos relevantes
+Agente 5 (Engagement)     → responde comentarios con Llama
+Agente 6 (Analista)       → reporte semanal → ajusta estrategia
 ```
 
 ---
 
-## Contexto del desarrollador
+## Notas de desarrollo
 
-- Background en análisis de datos, SQL, sistemas
-- Objetivo: sistema automatizado de contenido que escale sin intervención manual diaria
-- El CLAUDE.md debe actualizarse con cada cambio significativo al proyecto
+- Siempre crear archivo de migración SQL antes de ejecutar cambios en Supabase
+- Migraciones van en `database/migrations/` con número secuencial
+- El `.env` nunca va al repositorio — está en `.gitignore`
+- Actualizar este CLAUDE.md con cada cambio significativo al proyecto
+- Commits descriptivos: `feat:`, `fix:`, `refactor:`, `migracion:`
