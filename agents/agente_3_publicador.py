@@ -45,7 +45,7 @@ slack    = WebClient(token=SLACK_TOKEN)
 
 ESTANDARES_FB = """
 1. HOOK — La primera línea es impactante y genera curiosidad inmediata.
-2. LONGITUD — Entre 100 y 200 palabras. Ni muy corto ni muy largo para Facebook.
+2. LONGITUD — Entre 400 y 600 palabras. Ni muy corto ni muy largo para Facebook.
 3. EMOJIS — Entre 3 y 7 emojis relevantes y coherentes con el tono del tema.
 4. PREGUNTA FINAL — Termina con una pregunta que invite a comentar.
 5. HASHTAGS — Incluye entre 3 y 5 hashtags relevantes al final.

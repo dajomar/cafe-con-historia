@@ -261,7 +261,7 @@ Tu respuesta DEBE:
 1. Empezar con un hook impactante
 2. Incluir fechas o épocas históricas concretas y verificables
 3. Conectar el pasado con el presente explícitamente
-4. Tono conversacional, entre 200 y 300 palabras
+4. Tono conversacional, entre 400 y 600 palabras
 5. Terminar con una pregunta reflexiva
 6. Incluir entre 3 y 7 emojis coherentes con el tono
 
