@@ -4,7 +4,6 @@ import traceback
 from datetime import datetime
 from dotenv import load_dotenv
 from slack_sdk import WebClient
-from slack_sdk.errors import SlackApiError
 
 # ============================================================
 # CONFIGURACIÓN
@@ -13,10 +12,21 @@ from slack_sdk.errors import SlackApiError
 load_dotenv("D:\\proyectos\\cafe-con-historia\\.env")
 
 SLACK_TOKEN   = os.getenv("SLACK_TOKEN")
-SLACK_CHANNEL = os.getenv("SLACK_CHANNEL", "#contenido")
-SLACK_ERRORES = "#errores"
+CANAL_CONTENIDO = os.getenv("SLACK_CHANNEL", "#contenido")
+CANAL_INFRA     = os.getenv("SLACK_CANAL_INFRA", "#infraestructura")
 
 slack = WebClient(token=SLACK_TOKEN)
+
+sys.path.insert(0, "D:\\proyectos\\cafe-con-historia\\utils")
+sys.path.insert(0, "D:\\proyectos\\cafe-con-historia\\agents")
+
+from errores import (
+    ErrorInfraestructura,
+    verificar_ollama,
+    verificar_token_facebook,
+    notificar_infra,
+    notificar_canal
+)
 
 # ============================================================
 # LOGGING
@@ -34,73 +44,55 @@ def log(mensaje):
 # ============================================================
 
 def notificar_inicio():
-    try:
-        slack.chat_postMessage(
-            channel=SLACK_CHANNEL,
-            text=f"☕ *Café con Historia* — Pipeline iniciado\n_{datetime.now().strftime('%d/%m/%Y %H:%M')}_",
-            mrkdwn=True
-        )
-    except Exception as e:
-        log(f"Aviso: No se pudo notificar inicio: {e}")
+    notificar_canal(
+        CANAL_CONTENIDO,
+        f"☕ *Café con Historia* — Pipeline iniciado\n_{datetime.now().strftime('%d/%m/%Y %H:%M')}_"
+    )
 
 def notificar_exito():
+    notificar_canal(
+        CANAL_CONTENIDO,
+        f"✅ *Pipeline completado exitosamente*\n_{datetime.now().strftime('%d/%m/%Y %H:%M')}_"
+    )
+
+# ============================================================
+# VERIFICACIONES PREVIAS
+# ============================================================
+
+def verificar_infraestructura():
+    log("Verificando infraestructura...")
+
+    # 1. Verificar Ollama
     try:
-        slack.chat_postMessage(
-            channel=SLACK_CHANNEL,
-            text=f"✅ *Pipeline completado exitosamente*\n_{datetime.now().strftime('%d/%m/%Y %H:%M')}_",
-            mrkdwn=True
-        )
-    except Exception as e:
-        log(f"Aviso: No se pudo notificar éxito: {e}")
+        verificar_ollama()
+        log("✓ Ollama corriendo")
+    except ErrorInfraestructura as e:
+        log(f"ERROR INFRAESTRUCTURA — Ollama: {e}")
+        notificar_infra(str(e))
+        sys.exit(1)
 
-def notificar_error(agente, error):
-    mensaje = f"""🚨 *Error crítico en el pipeline — {agente}*
-
-```{error[:500]}```
-
-_Fecha: {datetime.now().strftime('%d/%m/%Y %H:%M')}_
-_Pipeline detenido. Revisión manual requerida._"""
+    # 2. Verificar token de Facebook
     try:
-        slack.chat_postMessage(
-            channel=SLACK_ERRORES,
-            text=mensaje,
-            mrkdwn=True
-        )
-    except Exception as e:
-        log(f"No se pudo enviar error a Slack: {e}")
+        verificar_token_facebook()
+        log("✓ Token de Facebook verificado")
+    except ErrorInfraestructura as e:
+        log(f"ERROR INFRAESTRUCTURA — Facebook token: {e}")
+        notificar_infra(str(e))
+        sys.exit(1)
+
+    log("✓ Infraestructura lista")
 
 # ============================================================
 # EJECUTAR AGENTES
 # ============================================================
 
-AGENTS_PATH = "D:\\proyectos\\cafe-con-historia\\agents"
-
-def ejecutar_agente_1():
-    log("Iniciando Agente 1 — Investigador...")
-    sys.path.insert(0, AGENTS_PATH)
+def ejecutar_agente(nombre, modulo_nombre):
+    log(f"Iniciando {nombre}...")
     import importlib
-    agente = importlib.import_module("agente_1_investigador")
+    agente = importlib.import_module(modulo_nombre)
     importlib.reload(agente)
     agente.correr_agente()
-    log("✓ Agente 1 completado")
-
-def ejecutar_agente_2():
-    log("Iniciando Agente 2 — Editor crítico...")
-    sys.path.insert(0, AGENTS_PATH)
-    import importlib
-    agente = importlib.import_module("agente_2_editor")
-    importlib.reload(agente)
-    agente.correr_agente()
-    log("✓ Agente 2 completado")
-
-def ejecutar_agente_3():
-    log("Iniciando Agente 3 — Publicador...")
-    sys.path.insert(0, AGENTS_PATH)
-    import importlib
-    agente = importlib.import_module("agente_3_publicador")
-    importlib.reload(agente)
-    agente.correr_agente()
-    log("✓ Agente 3 completado")
+    log(f"✓ {nombre} completado")
 
 # ============================================================
 # PIPELINE PRINCIPAL
@@ -111,36 +103,54 @@ def main():
     log("CAFÉ CON HISTORIA — Pipeline iniciado")
     log("=" * 50)
 
+    # Verificar infraestructura ANTES de todo
+    verificar_infraestructura()
+
     notificar_inicio()
 
     # Agente 1 — Investigador
     try:
-        ejecutar_agente_1()
+        ejecutar_agente("Agente 1 — Investigador", "agente_1_investigador")
+    except ErrorInfraestructura as e:
+        log(f"ERROR INFRAESTRUCTURA en Agente 1: {e}")
+        notificar_infra(f"Agente 1 — Investigador\n{str(e)}")
+        sys.exit(1)
     except Exception as e:
-        error = traceback.format_exc()
         log(f"ERROR en Agente 1: {e}")
-        notificar_error("Agente 1 — Investigador", error)
-        log("Pipeline detenido")
+        notificar_canal(
+            os.getenv("SLACK_CANAL_ERRORES", "#errores"),
+            f"🚨 *Error en Agente 1*\n```{traceback.format_exc()[:500]}```"
+        )
         sys.exit(1)
 
     # Agente 2 — Editor crítico
     try:
-        ejecutar_agente_2()
+        ejecutar_agente("Agente 2 — Editor", "agente_2_editor")
+    except ErrorInfraestructura as e:
+        log(f"ERROR INFRAESTRUCTURA en Agente 2: {e}")
+        notificar_infra(f"Agente 2 — Editor\n{str(e)}")
+        sys.exit(1)
     except Exception as e:
-        error = traceback.format_exc()
         log(f"ERROR en Agente 2: {e}")
-        notificar_error("Agente 2 — Editor", error)
-        log("Pipeline detenido")
+        notificar_canal(
+            os.getenv("SLACK_CANAL_ERRORES", "#errores"),
+            f"🚨 *Error en Agente 2*\n```{traceback.format_exc()[:500]}```"
+        )
         sys.exit(1)
 
     # Agente 3 — Publicador
     try:
-        ejecutar_agente_3()
+        ejecutar_agente("Agente 3 — Publicador", "agente_3_publicador")
+    except ErrorInfraestructura as e:
+        log(f"ERROR INFRAESTRUCTURA en Agente 3: {e}")
+        notificar_infra(f"Agente 3 — Publicador\n{str(e)}")
+        sys.exit(1)
     except Exception as e:
-        error = traceback.format_exc()
         log(f"ERROR en Agente 3: {e}")
-        notificar_error("Agente 3 — Publicador", error)
-        log("Pipeline detenido")
+        notificar_canal(
+            os.getenv("SLACK_CANAL_ERRORES", "#errores"),
+            f"🚨 *Error en Agente 3*\n```{traceback.format_exc()[:500]}```"
+        )
         sys.exit(1)
 
     log("Pipeline completado exitosamente")

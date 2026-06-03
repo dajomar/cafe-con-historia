@@ -1,11 +1,22 @@
 import os
+import sys
 import json
 import requests
 from datetime import datetime
 from dotenv import load_dotenv
 from supabase import create_client
 from slack_sdk import WebClient
-from slack_sdk.errors import SlackApiError
+
+sys.path.insert(0, "D:\\proyectos\\cafe-con-historia\\utils")
+from errores import (
+    ErrorInfraestructura,
+    ErrorContenido,
+    verificar_token_facebook,
+    verificar_error_facebook,
+    notificar_infra,
+    notificar_error_contenido,
+    notificar_canal
+)
 
 # ============================================================
 # CONFIGURACIÓN
@@ -13,18 +24,17 @@ from slack_sdk.errors import SlackApiError
 
 load_dotenv("D:\\proyectos\\cafe-con-historia\\.env")
 
-SUPABASE_URL  = os.getenv("SUPABASE_URL")
-SUPABASE_KEY  = os.getenv("SUPABASE_KEY")
-SLACK_TOKEN   = os.getenv("SLACK_TOKEN")
-SLACK_CHANNEL = os.getenv("SLACK_CHANNEL", "#contenido")
-SLACK_ERRORES = "#errores"
-FB_PAGE_TOKEN = os.getenv("FB_PAGE_TOKEN")
-FB_PAGE_ID    = os.getenv("FB_PAGE_ID")
-OLLAMA_URL    = "http://localhost:11434/api/generate"
-MODELO        = "llama3.1"
+SUPABASE_URL    = os.getenv("SUPABASE_URL")
+SUPABASE_KEY    = os.getenv("SUPABASE_KEY")
+SLACK_TOKEN     = os.getenv("SLACK_TOKEN")
+CANAL_CONTENIDO = os.getenv("SLACK_CHANNEL", "#contenido")
+FB_PAGE_TOKEN   = os.getenv("FB_PAGE_TOKEN")
+FB_PAGE_ID      = os.getenv("FB_PAGE_ID")
+OLLAMA_URL      = os.getenv("OLLAMA_ENDPOINT", "http://localhost:11434") + "/api/generate"
+MODELO          = "llama3.1"
 
-MAX_INTENTOS  = 3
-SCORE_MINIMO  = 7
+MAX_INTENTOS    = 3
+SCORE_MINIMO    = 7
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 slack    = WebClient(token=SLACK_TOKEN)
@@ -44,7 +54,7 @@ ESTANDARES_FB = """
 """
 
 # ============================================================
-# PASO 1 — Obtener contenido aprobado listo para publicar
+# PASO 1 — Obtener contenido aprobado
 # ============================================================
 
 def obtener_contenido_aprobado():
@@ -62,11 +72,11 @@ def obtener_contenido_aprobado():
         return None
 
     contenido = resultado.data[0]
-    print(f"Contenido aprobado encontrado: {contenido['temas']['pregunta']}")
+    print(f"Contenido encontrado: {contenido['temas']['pregunta']}")
     return contenido
 
 # ============================================================
-# PASO 2 — Adaptar para Facebook con Llama
+# PASO 2 — Adaptar para Facebook
 # ============================================================
 
 def adaptar_para_facebook(pregunta, contenido_largo, categoria):
@@ -87,11 +97,7 @@ ESTÁNDARES QUE DEBE CUMPLIR:
 
 Responde SOLO con el texto del post listo para publicar, sin explicaciones ni meta-comentarios."""
 
-    payload = {
-        "model": MODELO,
-        "prompt": prompt,
-        "stream": False
-    }
+    payload = {"model": MODELO, "prompt": prompt, "stream": False}
 
     try:
         respuesta = requests.post(OLLAMA_URL, json=payload, timeout=600)
@@ -99,12 +105,13 @@ Responde SOLO con el texto del post listo para publicar, sin explicaciones ni me
         post = data.get("response", "").strip()
         print(f"Post generado: {len(post)} caracteres")
         return post
+    except requests.ConnectionError:
+        raise ErrorInfraestructura("Ollama no responde al adaptar contenido para Facebook")
     except Exception as e:
-        print(f"Error adaptando: {e}")
-        return None
+        raise ErrorContenido(f"Error adaptando contenido: {e}")
 
 # ============================================================
-# PASO 3 — Evaluar el post de Facebook
+# PASO 3 — Evaluar post de Facebook
 # ============================================================
 
 def evaluar_post_facebook(pregunta, post_texto):
@@ -141,11 +148,7 @@ Responde ÚNICAMENTE con un objeto JSON con este formato exacto:
 Score mínimo para aprobar: {SCORE_MINIMO}/10.
 Responde SOLO con el JSON."""
 
-    payload = {
-        "model": MODELO,
-        "prompt": prompt,
-        "stream": False
-    }
+    payload = {"model": MODELO, "prompt": prompt, "stream": False}
 
     try:
         respuesta = requests.post(OLLAMA_URL, json=payload, timeout=600)
@@ -155,12 +158,12 @@ Responde SOLO con el JSON."""
         inicio = texto.find("{")
         fin = texto.rfind("}") + 1
         if inicio >= 0 and fin > inicio:
-            evaluacion = json.loads(texto[inicio:fin])
-            return evaluacion
-        return None
-    except Exception as e:
-        print(f"Error evaluando post: {e}")
-        return None
+            return json.loads(texto[inicio:fin])
+        raise ErrorContenido("Llama no respondió con JSON válido en evaluación")
+    except requests.ConnectionError:
+        raise ErrorInfraestructura("Ollama no responde al evaluar post de Facebook")
+    except json.JSONDecodeError as e:
+        raise ErrorContenido(f"Error parseando evaluación: {e}")
 
 # ============================================================
 # PASO 4 — Publicar en Facebook
@@ -168,33 +171,43 @@ Responde SOLO con el JSON."""
 
 def publicar_facebook(texto):
     print("Publicando en Facebook...")
+
+    # Verificar token antes de publicar
+    verificar_token_facebook()
+
     url = f"https://graph.facebook.com/v25.0/{FB_PAGE_ID}/feed"
-    payload = {
-        "message": texto,
-        "access_token": FB_PAGE_TOKEN
-    }
+    payload = {"message": texto, "access_token": FB_PAGE_TOKEN}
+
     try:
         respuesta = requests.post(url, data=payload, timeout=30)
         data = respuesta.json()
+
         if "id" in data:
             print(f"✓ Publicado — Post ID: {data['id']}")
             return data["id"]
-        else:
-            print(f"Error Facebook: {data}")
-            return None
+
+        # Detectar si es error de infraestructura o contenido
+        if "error" in data:
+            verificar_error_facebook(data["error"])
+
+        raise ErrorContenido(f"Error desconocido de Facebook: {data}")
+
+    except requests.ConnectionError:
+        raise ErrorInfraestructura("Sin conexión a internet al publicar en Facebook")
+    except (ErrorInfraestructura, ErrorContenido):
+        raise
     except Exception as e:
-        print(f"Error publicando: {e}")
-        return None
+        raise ErrorContenido(f"Error publicando en Facebook: {e}")
 
 # ============================================================
 # PASO 5 — Guardar y notificar
 # ============================================================
 
-def guardar_publicacion(contenido_id, post_facebook, fb_post_id, score):
+def guardar_publicacion(contenido_id, post_facebook):
     supabase.table("contenido").update({
         "contenido_facebook": post_facebook,
     }).eq("id", contenido_id).execute()
-    print(f"✓ Publicación guardada en Supabase")
+    print("✓ Publicación guardada en Supabase")
 
 def notificar_publicado(pregunta, post_facebook, fb_post_id, score, evaluacion):
     mensaje = f"""📢 *Publicado en Facebook*
@@ -212,18 +225,7 @@ def notificar_publicado(pregunta, post_facebook, fb_post_id, score, evaluacion):
 🔗 Post ID: `{fb_post_id}`
 _Publicado: {datetime.now().strftime('%d/%m/%Y %H:%M')}_"""
 
-    slack.chat_postMessage(channel=SLACK_CHANNEL, text=mensaje, mrkdwn=True)
-
-def notificar_error_publicacion(pregunta, razon):
-    mensaje = f"""🚨 *Error al publicar en Facebook*
-*{pregunta}*
-
-El post no pasó la evaluación de calidad después de {MAX_INTENTOS} intentos.
-Razón: {razon}
-
-_Revisión manual requerida._"""
-
-    slack.chat_postMessage(channel=SLACK_ERRORES, text=mensaje, mrkdwn=True)
+    notificar_canal(CANAL_CONTENIDO, mensaje)
 
 # ============================================================
 # AGENTE PRINCIPAL
@@ -234,60 +236,59 @@ def correr_agente():
     print("CAFÉ CON HISTORIA — Agente 3 (Publicador)")
     print("=" * 50)
 
-    # Paso 1 — Obtener contenido aprobado
     contenido = obtener_contenido_aprobado()
     if not contenido:
         return
 
-    pregunta       = contenido["temas"]["pregunta"]
-    categoria      = contenido["temas"]["categoria"]
-    contenido_id   = contenido["id"]
+    pregunta        = contenido["temas"]["pregunta"]
+    categoria       = contenido["temas"]["categoria"]
+    contenido_id    = contenido["id"]
     contenido_largo = contenido["contenido_slack"]
 
-    intento = 1
+    intento      = 1
     ultima_razon = ""
-    post_actual = None
+    post_actual  = None
 
     while intento <= MAX_INTENTOS:
         print(f"\n--- Intento {intento}/{MAX_INTENTOS} ---")
 
-        # Paso 2 — Adaptar para Facebook
-        post_actual = adaptar_para_facebook(pregunta, contenido_largo, categoria)
-        if not post_actual:
-            intento += 1
-            continue
+        try:
+            # Adaptar para Facebook
+            post_actual = adaptar_para_facebook(pregunta, contenido_largo, categoria)
 
-        # Paso 3 — Evaluar el post
-        evaluacion = evaluar_post_facebook(pregunta, post_actual)
-        if not evaluacion:
-            intento += 1
-            continue
+            # Evaluar el post
+            evaluacion = evaluar_post_facebook(pregunta, post_actual)
+            score      = evaluacion.get("score", 0)
+            aprobado   = evaluacion.get("aprobado", False) and score >= SCORE_MINIMO
+            detalles   = evaluacion.get("evaluacion", {})
+            ultima_razon = evaluacion.get("razon_rechazo", "")
 
-        score    = evaluacion.get("score", 0)
-        aprobado = evaluacion.get("aprobado", False) and score >= SCORE_MINIMO
-        detalles = evaluacion.get("evaluacion", {})
-        ultima_razon = evaluacion.get("razon_rechazo", "")
+            print(f"Score post Facebook: {score}/10 | Aprobado: {aprobado}")
 
-        print(f"Score post Facebook: {score}/10 | Aprobado: {aprobado}")
+            if aprobado:
+                # Publicar
+                fb_post_id = publicar_facebook(post_actual)
 
-        if aprobado:
-            # Paso 4 — Publicar
-            fb_post_id = publicar_facebook(post_actual)
-            if not fb_post_id:
-                intento += 1
-                continue
+                # Guardar y notificar
+                guardar_publicacion(contenido_id, post_actual)
+                notificar_publicado(pregunta, post_actual, fb_post_id, score, detalles)
+                print(f"\n✓ Publicado exitosamente en intento {intento}")
+                return
 
-            # Paso 5 — Guardar y notificar
-            guardar_publicacion(contenido_id, post_actual, fb_post_id, score)
-            notificar_publicado(pregunta, post_actual, fb_post_id, score, detalles)
-            print(f"\n✓ Publicado exitosamente en intento {intento}")
-            return
+            print(f"Post rechazado: {ultima_razon}")
 
-        print(f"Post rechazado: {ultima_razon}")
+        except ErrorInfraestructura:
+            # Relanzar para que main.py lo capture y detenga el pipeline
+            raise
+
+        except ErrorContenido as e:
+            print(f"Error de contenido en intento {intento}: {e}")
+            ultima_razon = str(e)
+
         intento += 1
 
     # Agotó los intentos
-    notificar_error_publicacion(pregunta, ultima_razon)
+    notificar_error_contenido("Agente 3 — Publicador", pregunta, ultima_razon, MAX_INTENTOS)
     print(f"\n✗ No se pudo publicar después de {MAX_INTENTOS} intentos")
 
 if __name__ == "__main__":
