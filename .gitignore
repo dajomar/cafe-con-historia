@@ -1,0 +1,19 @@
+# Credenciales — nunca al repositorio
+.env
+
+# Logs
+*.log
+pipeline.log
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# VS Code
+.vscode/
+
+# Sistema
+.DS_Store
+Thumbs.db
