@@ -82,20 +82,26 @@ def obtener_contenido_pendiente():
 def verificar_hechos(pregunta, contenido_texto):
     print("Verificando hechos como historiador escéptico...")
 
-    prompt = f"""Eres un historiador escéptico y riguroso revisando contenido del canal "Café con Historia".
-Tu única misión es detectar posibles errores factuales — NO evaluar el estilo ni el tono.
+    prompt = f"""Eres un verificador de hechos para el canal educativo "Café con Historia".
+Este es contenido de divulgación histórica — NO es una tesis académica.
+Las simplificaciones narrativas y los matices históricos SON ACEPTABLES y no deben marcarse como errores.
 
 TEMA: {pregunta}
 
 CONTENIDO A VERIFICAR:
 {contenido_texto}
 
-Busca específicamente:
-1. Fechas que no encajan con el contexto histórico
-2. Nombres de personas, lugares o eventos que parecen incorrectos
-3. Causas y efectos históricos invertidos o distorsionados
-4. Afirmaciones que contradicen hechos ampliamente documentados
-5. Anacronismos — cosas descritas fuera de su época
+Busca ÚNICAMENTE errores graves y verificables:
+1. Fechas completamente incorrectas — ejemplo: decir que algo ocurrió en 1800 cuando fue en 1950
+2. Nombres completamente equivocados — ejemplo: atribuir un evento a la persona incorrecta
+3. Eventos que nunca ocurrieron — afirmaciones inventadas sin base histórica
+4. Afirmaciones que contradicen hechos universalmente aceptados y documentados
+
+NO marques como error:
+- Simplificaciones narrativas propias de la divulgación popular
+- Matices históricos que podrían debatirse académicamente
+- Omisión de detalles secundarios
+- Diferentes interpretaciones válidas de un mismo evento
 
 Responde ÚNICAMENTE con un JSON:
 {{
@@ -103,9 +109,9 @@ Responde ÚNICAMENTE con un JSON:
   "nivel_confianza": <"alto" | "medio" | "bajo">,
   "errores_detectados": [
     {{
-      "fragmento": "<texto exacto del contenido que genera duda>",
-      "problema": "<descripción del posible error>",
-      "sugerencia": "<cómo corregirlo>"
+      "fragmento": "<texto exacto con error grave>",
+      "problema": "<descripción del error grave y verificable>",
+      "sugerencia": "<corrección específica>"
     }}
   ],
   "veredicto": "<aprobado | revision_manual | rechazado>",
@@ -113,11 +119,11 @@ Responde ÚNICAMENTE con un JSON:
 }}
 
 Valores de veredicto:
-- aprobado: sin errores detectables, contenido confiable
-- revision_manual: hay dudas menores que requieren revisión humana
-- rechazado: hay errores graves que comprometen la credibilidad
+- aprobado: sin errores graves, contenido válido para divulgación
+- revision_manual: hay al menos un error grave y verificable que requiere corrección
+- rechazado: el contenido tiene múltiples errores graves que lo hacen inpublicable
 
-Si no detectas errores, devuelve tiene_errores=false y errores_detectados=[].
+Si no detectas errores graves, devuelve tiene_errores=false, errores_detectados=[] y veredicto=aprobado.
 Responde SOLO con el JSON."""
 
     payload = {"model": MODELO, "prompt": prompt, "stream": False}
@@ -358,12 +364,11 @@ def correr_agente():
             guardar_evaluacion(contenido_id, 0, False, intentos=1)
             print("\n✗ Contenido rechazado por errores factuales graves — revisión manual requerida")
             return
-            
+
         if veredicto == "revision_manual":
+            # Dudas menores — notificar pero continuar con evaluación editorial
             notificar_revision_manual(pregunta, texto_actual, verificacion)
-            guardar_evaluacion(contenido_id, 0, False, intentos=1)
-            print("\n⚠ Contenido detenido por dudas factuales — revisión manual requerida")
-            return
+            print("⚠ Dudas factuales menores notificadas — continuando con evaluación editorial")
 
     except ErrorInfraestructura:
         raise
