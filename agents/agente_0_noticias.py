@@ -2,12 +2,15 @@ import os
 import sys
 import json
 import requests
+import pathlib
 import xml.etree.ElementTree as ET
 from datetime import datetime, date
 from dotenv import load_dotenv
 from supabase import create_client
 
-sys.path.insert(0, "D:\\proyectos\\cafe-con-historia\\utils")
+BASE_DIR = pathlib.Path(__file__).parent.parent
+sys.path.insert(0, str(BASE_DIR / "utils"))
+
 from errores import (
     ErrorInfraestructura,
     ErrorContenido,
@@ -20,7 +23,7 @@ from errores import (
 # CONFIGURACIÓN
 # ============================================================
 
-load_dotenv("D:\\proyectos\\cafe-con-historia\\.env")
+load_dotenv(BASE_DIR / ".env")
 
 SUPABASE_URL    = os.getenv("SUPABASE_URL")
 SUPABASE_KEY    = os.getenv("SUPABASE_KEY")

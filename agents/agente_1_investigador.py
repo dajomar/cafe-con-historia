@@ -2,12 +2,15 @@ import os
 import sys
 import random
 import requests
+import pathlib
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from supabase import create_client
 from slack_sdk import WebClient
 
-sys.path.insert(0, "D:\\proyectos\\cafe-con-historia\\utils")
+BASE_DIR = pathlib.Path(__file__).parent.parent
+sys.path.insert(0, str(BASE_DIR / "utils"))
+
 from errores import (
     ErrorInfraestructura,
     ErrorContenido,
@@ -21,7 +24,7 @@ from errores import (
 # CONFIGURACIÓN
 # ============================================================
 
-load_dotenv("D:\\proyectos\\cafe-con-historia\\.env")
+load_dotenv(BASE_DIR / ".env")
 
 SUPABASE_URL    = os.getenv("SUPABASE_URL")
 SUPABASE_KEY    = os.getenv("SUPABASE_KEY")

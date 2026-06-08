@@ -1,6 +1,7 @@
 import os
 import sys
 import traceback
+import pathlib
 from datetime import datetime
 from dotenv import load_dotenv
 
@@ -8,18 +9,21 @@ from dotenv import load_dotenv
 # CONFIGURACIÓN
 # ============================================================
 
-load_dotenv("D:\\proyectos\\cafe-con-historia\\.env")
+
 
 SLACK_TOKEN     = os.getenv("SLACK_TOKEN")
 CANAL_CONTENIDO = os.getenv("SLACK_CHANNEL", "#contenido")
 CANAL_INFRA     = os.getenv("SLACK_CANAL_INFRA", "#infraestructura")
 CANAL_ERRORES   = os.getenv("SLACK_CANAL_ERRORES", "#errores")
+BASE_DIR = pathlib.Path(__file__).parent
+
+load_dotenv(BASE_DIR / ".env")
 
 # Días donde corre el Agente 0 (0=lunes, 2=miércoles, 4=viernes)
 DIAS_AGENTE_0 = [0, 2, 4]
 
-sys.path.insert(0, "D:\\proyectos\\cafe-con-historia\\utils")
-sys.path.insert(0, "D:\\proyectos\\cafe-con-historia\\agents")
+sys.path.insert(0, str(BASE_DIR / "utils"))
+sys.path.insert(0, str(BASE_DIR / "agents"))
 
 from errores import (
     ErrorInfraestructura,
@@ -38,7 +42,7 @@ def log(mensaje):
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     linea = f"[{timestamp}] {mensaje}"
     print(linea)
-    with open("D:\\proyectos\\cafe-con-historia\\pipeline.log", "a", encoding="utf-8") as f:
+    with open(BASE_DIR / "pipeline.log", "a", encoding="utf-8") as f:
         f.write(linea + "\n")
 
 # ============================================================
