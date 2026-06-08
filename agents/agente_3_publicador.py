@@ -34,7 +34,7 @@ CANAL_CONTENIDO = os.getenv("SLACK_CHANNEL", "#contenido")
 FB_PAGE_TOKEN   = os.getenv("FB_PAGE_TOKEN")
 FB_PAGE_ID      = os.getenv("FB_PAGE_ID")
 OLLAMA_URL      = os.getenv("OLLAMA_ENDPOINT", "http://localhost:11434") + "/api/generate"
-MODELO          = "llama3.1"
+MODELO          = os.getenv("OLLAMA_MODEL", "llama3.1:8b")
 
 MAX_INTENTOS    = 3
 SCORE_MINIMO    = 7
