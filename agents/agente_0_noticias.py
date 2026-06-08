@@ -29,7 +29,7 @@ SUPABASE_URL    = os.getenv("SUPABASE_URL")
 SUPABASE_KEY    = os.getenv("SUPABASE_KEY")
 CANAL_CONTENIDO = os.getenv("SLACK_CHANNEL", "#contenido")
 OLLAMA_URL      = os.getenv("OLLAMA_ENDPOINT", "http://localhost:11434") + "/api/generate"
-MODELO          = "llama3.1"
+MODELO          = os.getenv("OLLAMA_MODEL", "llama3.1:8b")
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 

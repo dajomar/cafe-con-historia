@@ -33,7 +33,7 @@ SLACK_TOKEN     = os.getenv("SLACK_TOKEN")
 CANAL_CONTENIDO = os.getenv("SLACK_CHANNEL", "#contenido")
 CANAL_ERRORES   = os.getenv("SLACK_CANAL_ERRORES", "#errores")
 OLLAMA_URL      = os.getenv("OLLAMA_ENDPOINT", "http://localhost:11434") + "/api/generate"
-MODELO          = "llama3.1"
+MODELO          = os.getenv("OLLAMA_MODEL", "llama3.1:8b")
 MAX_INTENTOS    = 3
 SCORE_MINIMO    = 7
 
