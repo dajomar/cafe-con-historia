@@ -172,25 +172,48 @@ Responde SOLO con el JSON."""
 # PASO 4 — Publicar en Facebook
 # ============================================================
 
-def publicar_facebook(texto):
+def publicar_facebook(texto, imagen_path=None):
     print("Publicando en Facebook...")
 
     # Verificar token antes de publicar
     verificar_token_facebook()
 
-    url = f"https://graph.facebook.com/v25.0/{FB_PAGE_ID}/feed"
-    payload = {
-    "message": texto, 
-    "access_token": FB_PAGE_TOKEN,
-    "privacy": '{"value": "EVERYONE"}'
-    }
-
     try:
-        respuesta = requests.post(url, data=payload, timeout=30)
+        if imagen_path and pathlib.Path(imagen_path).exists():
+            # Publicar con imagen usando el endpoint /photos
+            print(f"Publicando con imagen: {imagen_path}")
+            url = f"https://graph.facebook.com/v25.0/{FB_PAGE_ID}/photos"
+            with open(imagen_path, "rb") as f:
+                respuesta = requests.post(
+                    url,
+                    files={"source": f},
+                    data={
+                        "message":      texto,
+                        "access_token": FB_PAGE_TOKEN,
+                        "privacy":      '{"value": "EVERYONE"}'
+                    },
+                    timeout=60
+                )
+        else:
+            # Publicar solo texto usando el endpoint /feed
+            if imagen_path:
+                print(f"Imagen no encontrada en {imagen_path} — publicando sin imagen")
+            url = f"https://graph.facebook.com/v25.0/{FB_PAGE_ID}/feed"
+            respuesta = requests.post(
+                url,
+                data={
+                    "message":      texto,
+                    "access_token": FB_PAGE_TOKEN,
+                    "privacy":      '{"value": "EVERYONE"}'
+                },
+                timeout=30
+            )
+
         data = respuesta.json()
 
         if "id" in data:
-            print(f"✓ Publicado — Post ID: {data['id']}")
+            modo = "con imagen" if imagen_path else "sin imagen"
+            print(f"✓ Publicado {modo} — Post ID: {data['id']}")
             return data["id"]
 
         # Detectar si es error de infraestructura o contenido
@@ -251,6 +274,7 @@ def correr_agente():
     categoria       = contenido["temas"]["categoria"]
     contenido_id    = contenido["id"]
     contenido_largo = contenido["contenido_slack"]
+    imagen_path     = contenido.get("imagen_url")
 
     intento      = 1
     ultima_razon = ""
@@ -273,8 +297,8 @@ def correr_agente():
             print(f"Score post Facebook: {score}/10 | Aprobado: {aprobado}")
 
             if aprobado:
-                # Publicar
-                fb_post_id = publicar_facebook(post_actual)
+                # Publicar (con imagen si está disponible)
+                fb_post_id = publicar_facebook(post_actual, imagen_path)
 
                 # Guardar y notificar
                 guardar_publicacion(contenido_id, post_actual)
