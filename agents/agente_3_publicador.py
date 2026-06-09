@@ -179,7 +179,11 @@ def publicar_facebook(texto):
     verificar_token_facebook()
 
     url = f"https://graph.facebook.com/v25.0/{FB_PAGE_ID}/feed"
-    payload = {"message": texto, "access_token": FB_PAGE_TOKEN}
+    payload = {
+    "message": texto, 
+    "access_token": FB_PAGE_TOKEN,
+    "privacy": '{"value": "EVERYONE"}'
+    }
 
     try:
         respuesta = requests.post(url, data=payload, timeout=30)
