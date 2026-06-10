@@ -63,7 +63,7 @@ ESTANDARES_FB = """
 def obtener_contenido_aprobado():
     print("Buscando contenido aprobado para publicar...")
     resultado = supabase.table("contenido")\
-        .select("*, temas(pregunta, categoria)")\
+        .select("*, temas(pregunta, categoria, tono)")\
         .eq("aprobado", True)\
         .is_("contenido_facebook", "null")\
         .order("fecha_generacion", desc=True)\
@@ -82,21 +82,166 @@ def obtener_contenido_aprobado():
 # PASO 2 — Adaptar para Facebook
 # ============================================================
 
-def adaptar_para_facebook(pregunta, contenido_largo, categoria):
+FORMATO_CURIOSO = """
+Hook impactante (1 línea que genere curiosidad inmediata)
+
+🌍 [Título sección 1 — contexto histórico]
+- Punto 1 desarrollado (2 líneas)
+- Punto 2 desarrollado (2 líneas)
+- Punto 3 desarrollado (2 líneas)
+👉 Conclusión de la sección (1 línea)
+
+📌 [Título sección 2 — cómo ocurrió]
+- Punto 1 desarrollado
+- Punto 2 desarrollado
+- Punto 3 desarrollado
+👉 Conclusión de la sección
+
+🔍 [Título sección 3 — consecuencias]
+- Punto 1 desarrollado
+- Punto 2 desarrollado
+👉 Conclusión de la sección
+
+🌐 [Título sección 4 — conexión con el presente]
+- Cómo afecta al mundo hoy
+- Por qué importa ahora
+👉 Conclusión de la sección
+
+✨ 5 datos que quizás no sabías
+1. Dato sorprendente y verificable
+2. Dato sorprendente y verificable
+3. Dato sorprendente y verificable
+4. Dato sorprendente y verificable
+5. Dato sorprendente y verificable
+
+📌 Conclusión
+- Punto de cierre 1
+- Punto de cierre 2
+- Punto de cierre 3
+
+Pregunta final que invite a comentar
+
+#Hashtag1 #Hashtag2 #Hashtag3 #Hashtag4 #Hashtag5
+"""
+
+FORMATO_PESADO = """
+Hook impactante y serio (1 línea)
+
+[Párrafo 1 — contexto histórico, 3-4 líneas]
+
+[Párrafo 2 — desarrollo del conflicto o crisis, 3-4 líneas]
+
+[Párrafo 3 — momento clave o punto de inflexión, 3-4 líneas]
+
+[Párrafo 4 — consecuencias históricas, 3-4 líneas]
+
+🌐 Conexión con el presente
+[Párrafo 5 — cómo ese pasado explica el hoy, 3-4 líneas]
+
+⚠️ Para reflexionar
+- Punto de reflexión 1
+- Punto de reflexión 2
+- Punto de reflexión 3
+
+Pregunta final abierta y equilibrada (sin tomar partido político)
+
+#Hashtag1 #Hashtag2 #Hashtag3 #Hashtag4 #Hashtag5
+"""
+
+FORMATO_REFLEXIVO = """
+Hook reflexivo (1 línea)
+
+[Párrafo 1 — contexto histórico, 3-4 líneas]
+
+[Párrafo 2 — desarrollo, 3-4 líneas]
+
+[Párrafo 3 — tensión o contradicción histórica, 3-4 líneas]
+
+💭 Para pensar
+- Reflexión 1
+- Reflexión 2
+- Reflexión 3
+
+🌐 Hoy en día
+[Párrafo — cómo ese pasado vive en el presente, 3-4 líneas]
+
+📌 Lo que nos deja la historia
+- Lección 1
+- Lección 2
+- Lección 3
+
+Pregunta filosófica final
+
+#Hashtag1 #Hashtag2 #Hashtag3 #Hashtag4 #Hashtag5
+"""
+
+FORMATO_INSPIRADOR = """
+Hook épico (1 línea)
+
+[Párrafo 1 — el punto de partida, quién o qué logró algo extraordinario, 3-4 líneas]
+
+[Párrafo 2 — el camino, los obstáculos, 3-4 líneas]
+
+[Párrafo 3 — el momento de quiebre o logro, 3-4 líneas]
+
+[Párrafo 4 — impacto en la historia, 3-4 líneas]
+
+🌐 Hoy en día
+[Párrafo — cómo ese legado vive en el presente, 3-4 líneas]
+
+💡 Lecciones que nos dejó
+- Lección 1
+- Lección 2
+- Lección 3
+
+✨ Datos que inspiran
+1. Dato
+2. Dato
+3. Dato
+
+Pregunta motivadora final
+
+#Hashtag1 #Hashtag2 #Hashtag3 #Hashtag4 #Hashtag5
+"""
+
+FORMATOS_POR_TONO = {
+    "curioso":    FORMATO_CURIOSO,
+    "pesado":     FORMATO_PESADO,
+    "reflexivo":  FORMATO_REFLEXIVO,
+    "inspirador": FORMATO_INSPIRADOR,
+}
+
+
+def adaptar_para_facebook(pregunta, contenido_largo, categoria, tono):
     print("Adaptando contenido para Facebook...")
+
+    formato = FORMATOS_POR_TONO.get(tono, FORMATO_REFLEXIVO)
 
     prompt = f"""Eres el community manager experto de "Café con Historia", canal educativo en Facebook.
 Tu enfoque es: "La historia explica el presente".
 
-Adapta este contenido para Facebook:
+Adapta este contenido para Facebook siguiendo EXACTAMENTE la estructura indicada:
+
 PREGUNTA: {pregunta}
 CATEGORÍA: {categoria}
+TONO: {tono}
 
 CONTENIDO ORIGINAL:
 {contenido_largo}
 
-ESTÁNDARES QUE DEBE CUMPLIR:
-{ESTANDARES_FB}
+ESTRUCTURA OBLIGATORIA PARA ESTE TONO ({tono}):
+{formato}
+
+REGLAS GLOBALES (aplican a todos los tonos):
+- NUNCA uses asteriscos ** — Facebook no los interpreta
+- NUNCA uses markdown — sin # para títulos, sin _ para cursiva
+- Usa emojis como iconos de sección, coherentes con el tema histórico
+- Entre 400 y 600 palabras en total — contenido rico, no mocho
+- El hook siempre va en la primera línea, sin etiqueta ni título previo
+- Los hashtags siempre en la última línea, entre 4 y 6
+- Tono conversacional en español latino
+- Equilibrado — sin sesgos políticos ni ideológicos
+- Los datos y fechas deben ser verificables y concretos — sin inventar
 
 Responde SOLO con el texto del post listo para publicar, sin explicaciones ni meta-comentarios."""
 
@@ -272,6 +417,7 @@ def correr_agente():
 
     pregunta        = contenido["temas"]["pregunta"]
     categoria       = contenido["temas"]["categoria"]
+    tono            = contenido["temas"].get("tono", "reflexivo")
     contenido_id    = contenido["id"]
     contenido_largo = contenido["contenido_slack"]
     imagen_path     = contenido.get("imagen_url")
@@ -285,7 +431,7 @@ def correr_agente():
 
         try:
             # Adaptar para Facebook
-            post_actual = adaptar_para_facebook(pregunta, contenido_largo, categoria)
+            post_actual = adaptar_para_facebook(pregunta, contenido_largo, categoria, tono)
 
             # Evaluar el post
             evaluacion = evaluar_post_facebook(pregunta, post_actual)
