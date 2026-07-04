@@ -183,6 +183,15 @@ FB_TOKEN_AVISO_DIAS=5
 
 # Ollama
 OLLAMA_ENDPOINT=http://localhost:11434
+
+# OpenAI
+OPENAI_API_KEY=sk-...
+OPENAI_IMAGE_MODEL=gpt-image-1
+OPENAI_TTS_MODEL=tts-1-hd
+OPENAI_TTS_VOZ=onyx
+
+# Flags de funcionalidades
+GENERAR_IMAGENES=true   # true | false — activa/desactiva el agente de imágenes
 ```
 
 ---
