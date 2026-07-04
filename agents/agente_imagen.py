@@ -34,6 +34,7 @@ OLLAMA_URL       = os.getenv("OLLAMA_ENDPOINT", "http://localhost:11434") + "/ap
 MODELO           = os.getenv("OLLAMA_MODEL", "llama3.1:8b")
 OPENAI_API_KEY   = os.getenv("OPENAI_API_KEY")
 OPENAI_IMG_MODEL = os.getenv("OPENAI_IMAGE_MODEL", "gpt-image-1")
+GENERAR_IMAGENES = os.getenv("GENERAR_IMAGENES", "false").lower() == "true"
 
 IMAGES_DIR   = BASE_DIR / "images"
 MAX_INTENTOS = 2
@@ -211,6 +212,10 @@ def correr_agente():
     print("=" * 50)
     print(f"CAFÉ CON HISTORIA — Agente Imagen ({OPENAI_IMG_MODEL})")
     print("=" * 50)
+
+    if not GENERAR_IMAGENES:
+        print("Generación de imágenes desactivada (GENERAR_IMAGENES=false). Saltando.")
+        return
 
     contenido = obtener_contenido_para_imagen()
     if not contenido:

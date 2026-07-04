@@ -20,7 +20,8 @@ BASE_DIR = pathlib.Path(__file__).parent
 load_dotenv(BASE_DIR / ".env")
 
 # Días donde corre el Agente 0 (0=lunes, 2=miércoles, 4=viernes)
-DIAS_AGENTE_0 = [0, 2, 4]
+DIAS_AGENTE_0    = [0, 2, 4]
+GENERAR_IMAGENES = os.getenv("GENERAR_IMAGENES", "false").lower() == "true"
 
 sys.path.insert(0, str(BASE_DIR / "utils"))
 sys.path.insert(0, str(BASE_DIR / "agents"))
@@ -161,17 +162,20 @@ def main():
         notificar_canal(CANAL_ERRORES, f"🚨 *Error en Agente 2*\n```{traceback.format_exc()[:500]}```")
         sys.exit(1)
 
-    # Agente Imagen — Generación de imagen con DALL-E 3
+    # Agente Imagen — Generación de imagen con gpt-image-1
     # No es fatal: si falla, el Agente 3 publica sin imagen
-    try:
-        ejecutar_agente("Agente Imagen — DALL-E 3", "agente_imagen")
-    except ErrorInfraestructura as e:
-        log(f"ERROR INFRAESTRUCTURA en Agente Imagen: {e}")
-        notificar_infra(f"Agente Imagen — DALL-E 3\n{str(e)}")
-        sys.exit(1)
-    except Exception as e:
-        log(f"AVISO — Agente Imagen falló, se publicará sin imagen: {e}")
-        notificar_canal(CANAL_ERRORES, f"⚠️ *Agente Imagen falló* — se publicará sin imagen\n```{str(e)[:300]}```")
+    if not GENERAR_IMAGENES:
+        log("Generación de imágenes desactivada (GENERAR_IMAGENES=false). Saltando.")
+    else:
+        try:
+            ejecutar_agente("Agente Imagen — gpt-image-1", "agente_imagen")
+        except ErrorInfraestructura as e:
+            log(f"ERROR INFRAESTRUCTURA en Agente Imagen: {e}")
+            notificar_infra(f"Agente Imagen — gpt-image-1\n{str(e)}")
+            sys.exit(1)
+        except Exception as e:
+            log(f"AVISO — Agente Imagen falló, se publicará sin imagen: {e}")
+            notificar_canal(CANAL_ERRORES, f"⚠️ *Agente Imagen falló* — se publicará sin imagen\n```{str(e)[:300]}```")
 
     # Agente 3 — Publicador
     try:
