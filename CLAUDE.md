@@ -200,7 +200,7 @@ GENERAR_IMAGENES=true   # true | false — activa/desactiva el agente de imágen
 
 ```bash
 # Conectarse a la PC desde el Mac
-ssh david@192.168.2.66
+ssh usuario@TU_IP_LOCAL
 D:
 cd proyectos\cafe-con-historia
 git pull
@@ -239,14 +239,14 @@ Ver guía completa en `guia-ssh-mac-pc.docx`.
 
 ```bash
 # Conectar
-ssh david@192.168.2.66
+ssh usuario@TU_IP_LOCAL
 
 # Sin contraseña (SSH keys)
 ssh-keygen -t ed25519 -C "cafe-con-historia"
-ssh-copy-id david@192.168.2.66
+ssh-copy-id usuario@TU_IP_LOCAL
 ```
 
-VS Code Remote SSH: instala extensión "Remote - SSH" → conectar a `david@192.168.2.66`
+VS Code Remote SSH: instala extensión "Remote - SSH" → conectar a `usuario@TU_IP_LOCAL`
 
 ---
 

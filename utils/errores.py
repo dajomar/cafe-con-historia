@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 
-load_dotenv("D:\\proyectos\\cafe-con-historia\\.env")
+load_dotenv()
 
 SLACK_TOKEN       = os.getenv("SLACK_TOKEN")
 CANAL_CONTENIDO   = os.getenv("SLACK_CHANNEL", "#contenido")

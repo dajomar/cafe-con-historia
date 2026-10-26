@@ -5,6 +5,10 @@
 *.log
 pipeline.log
 
+# Salidas generadas
+images/
+output/
+
 # Python
 __pycache__/
 *.pyc
