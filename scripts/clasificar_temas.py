@@ -15,7 +15,7 @@ load_dotenv(BASE_DIR / ".env")
 SUPABASE_URL  = os.getenv("SUPABASE_URL")
 SUPABASE_KEY  = os.getenv("SUPABASE_KEY")
 OLLAMA_URL    = os.getenv("OLLAMA_ENDPOINT", "http://localhost:11434") + "/api/generate"
-MODELO        = "llama3.1"
+MODELO          = os.getenv("OLLAMA_MODEL", "llama3.1:8b")
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
@@ -78,8 +78,15 @@ Responde SOLO con el JSON."""
         data = respuesta.json()
         texto = data.get("response", "").strip()
 
+        if not texto:
+            print(f"  DEBUG: Ollama devolvió respuesta vacía. data={data}")
+            return None
+
         inicio = texto.find("{")
         fin = texto.rfind("}") + 1
+        if inicio < 0 or fin <= inicio:
+            print(f"  DEBUG: No se encontró JSON. Respuesta de Llama:\n{texto[:300]}")
+            return None
         if inicio >= 0 and fin > inicio:
             resultado = json.loads(texto[inicio:fin])
 
